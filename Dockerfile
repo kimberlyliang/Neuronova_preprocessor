@@ -9,19 +9,22 @@
 # COPY app/ /app
 
 # CMD ["python3.12", "/app/main.py"]
-FROM python:3.11-slim
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+FROM python:3-slim
+# ENV PYTHONDONTWRITEBYTECODE=1
+# ENV PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y \
     libopenblas-dev \
     gcc \
+    qtbase5-dev \
+    qt6-base-dev \
+    && ln -sf /usr/lib/qt6/bin/qmake /usr/bin/qmake \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-RUN pip install -r requirements.txt
+COPY requirements.txt /app/requirements.txt
+RUN pip install -r /app/requirements.txt
 COPY app/ /app/
-COPY .env /app/.env
 RUN mkdir -p data/input data/output
 ENV INPUT_DIR=/data/input
 ENV OUTPUT_DIR=/data/output
-CMD ["python", "features_univariate.py"]
+CMD ["python", "process_ieeg.py"]
