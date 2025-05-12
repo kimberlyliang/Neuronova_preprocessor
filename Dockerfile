@@ -15,15 +15,12 @@ FROM python:3-slim
 RUN apt-get update && apt-get install -y \
     libopenblas-dev \
     gcc \
-    qtbase5-dev \
-    qt6-base-dev \
-    && ln -sf /usr/lib/qt6/bin/qmake /usr/bin/qmake \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install -r /app/requirements.txt
 COPY app/ /app/
+WORKDIR /app
 RUN mkdir -p data/input data/output
 ENV INPUT_DIR=/data/input
 ENV OUTPUT_DIR=/data/output

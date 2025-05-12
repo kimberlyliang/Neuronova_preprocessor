@@ -270,18 +270,20 @@ class IEEGTools:
         -----------
         ieeg_coords : pandas DataFrame
             DataFrame containing electrode coordinates and ROI information
-        mask_path : str
-            Path to the mask file
+        subject_id : str
+            Subject ID
         plot : bool, optional
             Whether to create a 3D visualization (default: False)
         '''
         # get mask path
-        load_dotenv()
-        BIDS_PATH = Path(os.getenv('BIDS_PATH'))
-                
-        mask_path = BIDS_PATH.joinpath(subject_id, 'derivatives', 'post_to_pre', 'surgerySeg_in_preT1.nii.gz')
+        input_dir = Path('/data/input')
+        mask_path = input_dir.joinpath(subject_id, 'derivatives', 'post_to_pre', 'surgerySeg_in_preT1.nii.gz')
+        
         if not mask_path.exists():
-            raise FileNotFoundError(f"Mask file not found for subject {subject_id}")
+            print(f"Warning: Mask file not found at {mask_path}. Skipping mask check.")
+            ieeg_coords['spared'] = True  # Mark all channels as spared if no mask
+            return ieeg_coords
+            
         mask = nib.load(mask_path)
         hdr = mask.header
         affine = mask.affine

@@ -10,6 +10,8 @@ import mne
 from IPython import embed
 from scipy import signal
 from process_ieeg_utils import IEEGTools
+from dotenv import load_dotenv
+import os
 
 #%%
 class IEEGClipProcessor(IEEGTools):
@@ -17,25 +19,46 @@ class IEEGClipProcessor(IEEGTools):
         super().__init__()
         self.project_root = Path(__file__).parent.parent
 
-    def find_subject_files(self, subject_id: str) -> Tuple[Path, Path]:
+    def find_subject_files(self, subject_id: str) -> Tuple[Path, Path, Path]:
         """Find H5 and electrode reconstruction files for a subject.
         
         Args:
             subject_id (str): Subject ID to find files for
             
         Returns:
-            Tuple[Path, Path]: Paths to iEEG file and electrode reconstruction file
+            Tuple[Path, Path, Path]: Paths to iEEG file, electrode reconstruction file, and MNI electrode reconstruction file
         """
         try:
-            ieeg_file_path = next(self.project_root.joinpath('data', 'source', 'BIDS').rglob(f'{subject_id}/**/interictal_ieeg*.h5'))
-            ieeg_recon_path = next(self.project_root.joinpath('data', 'source', 'BIDS').rglob(f'{subject_id}/**/*electrodes2ROI.csv'))
-            ieeg_recon_mni_path = next(self.project_root.joinpath('data', 'source', 'BIDS').rglob(f'{subject_id}/**/*electrodes2ROI_mni152_corrected.csv'))
-            self.ieeg_file_path = ieeg_file_path
-            self.ieeg_recon_path = ieeg_recon_path
-            self.ieeg_recon_mni_path = ieeg_recon_mni_path
-            return ieeg_file_path, ieeg_recon_path, ieeg_recon_mni_path
-        except StopIteration:
-            raise FileNotFoundError(f"No iEEG clips found for subject {subject_id}")
+            # Look in the input directory for the subject's files
+            input_dir = Path('/data/input')
+            subject_dir = input_dir / subject_id
+            print(f"Recursively searching for files in: {subject_dir}")
+            
+            try:
+                ieeg_file = next(subject_dir.rglob('interictal_ieeg*.h5'))
+                print(f"Found iEEG file: {ieeg_file}")
+            except StopIteration:
+                raise FileNotFoundError(f"No iEEG file found anywhere under {subject_dir}")
+            
+            try:
+                recon_file = next(subject_dir.rglob('*electrodes2ROI.csv'))
+                print(f"Found recon file: {recon_file}")
+            except StopIteration:
+                raise FileNotFoundError(f"No electrode reconstruction file found anywhere under {subject_dir}")
+            
+            try:
+                recon_mni_file = next(subject_dir.rglob('*electrodes2ROI_mni152_corrected.csv'))
+                print(f"Found MNI recon file: {recon_mni_file}")
+            except StopIteration:
+                raise FileNotFoundError(f"No MNI electrode reconstruction file found anywhere under {subject_dir}")
+            
+            self.ieeg_file_path = ieeg_file
+            self.ieeg_recon_path = recon_file
+            self.ieeg_recon_mni_path = recon_mni_file
+            
+            return self.ieeg_file_path, self.ieeg_recon_path, self.ieeg_recon_mni_path
+        except Exception as e:
+            raise FileNotFoundError(f"Error finding files for subject {subject_id}: {str(e)}")
     
     def load_ieeg_clips(self, ieeg_file_path: Path) -> Tuple[pd.DataFrame, float]:
         """Load all iEEG clips from an H5 file into a single DataFrame.
@@ -194,28 +217,44 @@ class IEEGClipProcessor(IEEGTools):
         Returns:
             Tuple[pd.DataFrame, pd.DataFrame]: Filtered iEEG data and electrode information
         """
+        print("\n=== Starting process_raw_ieeg ===")
         # Step 1: Find the files
-        ieeg_file_path, ieeg_recon_path = self.find_subject_files(subject_id)
+        print("Step 1: Finding files...")
+        ieeg_file_path, ieeg_recon_path, ieeg_recon_mni_path = self.find_subject_files(subject_id)
+        print(f"Found files:\n  iEEG: {ieeg_file_path}\n  Recon: {ieeg_recon_path}\n  MNI Recon: {ieeg_recon_mni_path}")
         
         # Step 2: Load the iEEG clips
+        print("\nStep 2: Loading iEEG clips...")
         ieeg_data, sampling_rate = self.load_ieeg_clips(ieeg_file_path)
+        print(f"Loaded iEEG data shape: {ieeg_data.shape}, sampling rate: {sampling_rate}")
         
         # Step 3: Prepare electrodes and iEEG data
+        print("\nStep 3: Preparing electrodes and iEEG data...")
         ieeg_data, electrodes2ROI = self.prepare_electrodes_and_ieeg(ieeg_data, ieeg_recon_path)
+        print(f"Prepared data shapes - iEEG: {ieeg_data.shape}, electrodes: {electrodes2ROI.shape}")
         
         # Step 4: Remove bad channels
+        print("\nStep 4: Removing bad channels...")
         ieeg_data, electrodes2ROI = self.remove_bad_channels(ieeg_data, electrodes2ROI, sampling_rate)
+        print(f"After removing bad channels - iEEG: {ieeg_data.shape}, electrodes: {electrodes2ROI.shape}")
         
         # Step 5: Process the iEEG signal (bipolar montage and filtering)
+        print("\nStep 5: Processing iEEG signal...")
         ieeg_filtered = self.process_ieeg_signal(ieeg_data, sampling_rate)
+        print(f"Processed iEEG shape: {ieeg_filtered.shape}")
         
         # Step 6: Finalize the electrodes data
+        print("\nStep 6: Finalizing electrodes data...")
         electrodes2ROI = self.finalize_electrodes(electrodes2ROI, ieeg_filtered, subject_id)
+        print(f"Finalized electrodes shape: {electrodes2ROI.shape}")
         
         # Step 7: Final alignment of iEEG and electrodes
+        print("\nStep 7: Final alignment...")
         ieeg_filtered = ieeg_filtered.loc[:, electrodes2ROI.index]
+        print(f"Aligned iEEG shape: {ieeg_filtered.shape}")
 
         # Step 8: Sort data by channel labels and columns
+        print("\nStep 8: Sorting data...")
         electrodes2ROI = electrodes2ROI.sort_index()
         ieeg_filtered = ieeg_filtered.sort_index(axis=1)
         
@@ -228,8 +267,10 @@ class IEEGClipProcessor(IEEGTools):
             self.plot_eeg_data(ieeg_filtered, sampling_rate)
 
         if saveEEG:
+            print("\nSaving processed data...")
             self.save_ieeg_processed(ieeg_filtered, sampling_rate, electrodes2ROI, subject_id)
 
+        print("=== Completed process_raw_ieeg ===\n")
         return ieeg_filtered, electrodes2ROI
     
     def save_ieeg_processed(self, ieeg_filtered: pd.DataFrame, sampling_rate: float, electrodes2ROI: pd.DataFrame, subject_id: str) -> None:
@@ -241,53 +282,63 @@ class IEEGClipProcessor(IEEGTools):
             electrodes2ROI (pd.DataFrame): Electrode information
             subject_id (str): Subject ID
         """
-        # Replace 'source' with 'derivatives' in the path
-        file_path_parts = list(self.ieeg_file_path.parts)
-        source_index = file_path_parts.index('source')
-        file_path_parts[source_index] = 'derivatives'
+        print("\n=== Starting save_ieeg_processed ===")
+        print(f"Input parameters:")
+        print(f"  ieeg_filtered shape: {ieeg_filtered.shape}")
+        print(f"  sampling_rate: {sampling_rate}")
+        print(f"  electrodes2ROI shape: {electrodes2ROI.shape}")
+        print(f"  subject_id: {subject_id}")
         
-        # Create the derivatives directory based on the original path structure
-        destination_path = Path(*file_path_parts[:-1])  # Remove the file name and its parent directory
+        # Try to get output path from environment variable, fallback to /data/output
+        load_dotenv()
+        output_base = Path(os.getenv('OUTPUT_PATH', '/data/output'))
+        print(f"Using output base path: {output_base}")
+        
+        destination_path = output_base / subject_id
+        print(f"Creating output directory: {destination_path}")
         destination_path.mkdir(parents=True, exist_ok=True)
+        
         h5_file_path = destination_path / 'interictal_ieeg_processed.h5'
+        print(f"Will save to: {h5_file_path}")
         
         # Check if file exists and handle accordingly
         if h5_file_path.exists():
             print(f"File already exists at {h5_file_path}. Will overwrite.")
         
         # Calculate optimal chunk size for ieeg data (time × channels)
-        # Assuming most access will be by time segments
         n_samples, n_channels = ieeg_filtered.shape
         chunk_size = (min(10000, n_samples), min(n_channels, 32))
+        print(f"Using chunk size: {chunk_size}")
         
         try:
+            print("Opening H5 file for writing...")
             with h5py.File(h5_file_path, 'w') as f:
-                # Create a group for this subject
+                print("Creating bipolar_montage group...")
                 subj_group = f.create_group('bipolar_montage')
                 
-                # Save iEEG data as float32 to save space
+                print("Saving iEEG data...")
                 ieeg_h5 = subj_group.create_dataset('ieeg', 
                                           data=ieeg_filtered.values.astype(np.float32),
                                           dtype='float32', 
                                           compression='gzip',
-                                          compression_opts=4,  # Balance between speed and compression
-                                          chunks=chunk_size)   # Optimize for time-series access
+                                          compression_opts=4,
+                                          chunks=chunk_size)
                 
-                # Add metadata as attributes
+                print("Adding iEEG metadata...")
                 ieeg_h5.attrs['sampling_rate'] = sampling_rate
                 ieeg_h5.attrs['channels_labels'] = ieeg_filtered.columns.tolist()
                 ieeg_h5.attrs['shape'] = ieeg_filtered.shape
-                ieeg_h5.attrs['raw_data_file'] = self.ieeg_file_path.name
+                ieeg_h5.attrs['raw_data_file'] = str(self.ieeg_file_path.name)
                 ieeg_h5.attrs['subject_id'] = subject_id
                 
-                # Save electrode data
+                print("Saving electrode data...")
                 coords_data = electrodes2ROI[['x', 'y', 'z']].values.astype(np.float32)
                 native_coord_mm = subj_group.create_dataset('coordinates', 
                                                     data=coords_data,
                                                     dtype='float32', 
                                                     compression='gzip')
                 
-                # Add electrode metadata
+                print("Adding electrode metadata...")
                 native_coord_mm.attrs['labels'] = electrodes2ROI.index.tolist()
                 native_coord_mm.attrs['original_labels'] = electrodes2ROI['labels'].tolist()
                 native_coord_mm.attrs['roi'] = electrodes2ROI['roi'].tolist()
@@ -297,12 +348,15 @@ class IEEGClipProcessor(IEEGTools):
             print(f"Successfully saved processed iEEG data for {subject_id} to {h5_file_path}")
         except Exception as e:
             print(f"Error saving data for {subject_id}: {str(e)}")
+            raise
+        print("=== Completed save_ieeg_processed ===\n")
 
 # Define the function outside the if __name__ == "__main__" block
 def process_subject(subject_id):
     try:
         print(f"Processing {subject_id}...")
         ieeg = IEEGClipProcessor()
+        print(f"Found files for {subject_id}")
         ieeg_filtered, electrodes2ROI = ieeg.process_raw_ieeg(subject_id, saveEEG=True)
         print(f"Completed processing {subject_id}")
         return subject_id, True
@@ -311,25 +365,40 @@ def process_subject(subject_id):
         return subject_id, False
 
 if __name__ == "__main__":
-
-    # subjects_to_find = [
-    #     'sub-RID0031', 'sub-RID0032', 'sub-RID0033', 'sub-RID0050', 'sub-RID0051',
-    #     'sub-RID0064', 'sub-RID0089', 'sub-RID0101', 'sub-RID0117', 'sub-RID0143',
-    #     'sub-RID0167', 'sub-RID0175', 'sub-RID0179', 'sub-RID0190', 'sub-RID0193',
-    #     'sub-RID0222', 'sub-RID0238', 'sub-RID0267', 'sub-RID0301', 'sub-RID0320',
-    #     'sub-RID0322', 'sub-RID0332', 'sub-RID0381', 'sub-RID0405', 'sub-RID0412',
-    #     'sub-RID0424', 'sub-RID0508', 'sub-RID0562', 'sub-RID0589', 'sub-RID0595',
-    #     'sub-RID0621', 'sub-RID0658', 'sub-RID0675', 'sub-RID0679', 'sub-RID0700',
-    #     'sub-RID0785', 'sub-RID0796', 'sub-RID0852', 'sub-RID0883', 'sub-RID0893',
-    #     'sub-RID0941', 'sub-RID0967'
-    # ]
+    # Get all subject directories from input path
+    input_dir = Path('/data/input')
+    subject_dirs = [d for d in input_dir.iterdir() if d.is_dir() and d.name.startswith('sub-')]
     
-    # Single subject test - uncomment to test one subject first
-    process_subject('sub-RID0031')
+    if not subject_dirs:
+        print("No subject directories found in /data/input")
+        exit(1)
+        
+    print(f"Found {len(subject_dirs)} subjects to process")
     
-    # Run parallel processing
-    # print(f"Starting parallel processing for {len(subjects_to_find)} subjects")
-    # with Pool() as pool:
-    #     results = pool.map(process_subject, subjects_to_find)
+    # Process each subject
+    results = []
+    for subject_dir in subject_dirs:
+        subject_id = subject_dir.name
+        print(f"\nProcessing {subject_id}...")
+        try:
+            result = process_subject(subject_id)
+            results.append(result)
+        except Exception as e:
+            print(f"Error processing {subject_id}: {str(e)}")
+            results.append((subject_id, False))
+    
+    # Print summary
+    print("\nProcessing Summary:")
+    successful = [s for s, success in results if success]
+    failed = [s for s, success in results if not success]
+    
+    print(f"\nSuccessfully processed ({len(successful)}):")
+    for subject in successful:
+        print(f"{subject}")
+        
+    if failed:
+        print(f"\nFailed to process ({len(failed)}):")
+        for subject in failed:
+            print(f"{subject}")
 
 # %%

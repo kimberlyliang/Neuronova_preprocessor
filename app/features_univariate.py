@@ -116,18 +116,18 @@ if __name__ == "__main__":
     output_dir = features_calculator.output_dir
 
     # Catch22 Features
-    print("Calculating Catch22 Features...")
-    catch22_df = features_calculator.catch22_features()
-    catch22_output_path = output_dir.joinpath(f"{subject_id}_catch22_features.csv")
-    catch22_df.to_csv(catch22_output_path)
-    print(f"Catch22 Features saved to: {catch22_output_path}")
+    # print("Calculating Catch22 Features...")
+    # catch22_df = features_calculator.catch22_features()
+    # catch22_output_path = output_dir.joinpath(f"{subject_id}_catch22_features.csv")
+    # catch22_df.to_csv(catch22_output_path)
+    # print(f"Catch22 Features saved to: {catch22_output_path}")
     
     # FOOOF Features
-    print("\nCalculating FOOOF Features...")
-    fooof_df = features_calculator.fooof_features()
-    fooof_output_path = output_dir.joinpath(f"{subject_id}_fooof_features.csv")
-    fooof_df.to_csv(fooof_output_path)
-    print(f"FOOOF Features saved to: {fooof_output_path}")
+    # print("\nCalculating FOOOF Features...")
+    # fooof_df = features_calculator.fooof_features()
+    # fooof_output_path = output_dir.joinpath(f"{subject_id}_fooof_features.csv")
+    # fooof_df.to_csv(fooof_output_path)
+    # print(f"FOOOF Features saved to: {fooof_output_path}")
     
     # Bandpower Features
     print("\nCalculating Bandpower Features...")
