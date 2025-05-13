@@ -365,24 +365,52 @@ def process_subject(subject_id):
         return subject_id, False
 
 if __name__ == "__main__":
+    # Print environment information
+    print("\nEnvironment Information:")
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Directory contents:")
+    for item in Path('.').iterdir():
+        print(f"  {item.name} ({'directory' if item.is_dir() else 'file'})")
+    
     # Get input path from environment variable, fallback to /data/input
     input_dir = Path(os.getenv('INPUT_DIR', '/data/input'))
-    print(f"Using input base path: {input_dir}")
+    print(f"\nUsing input base path: {input_dir}")
     
     # Create input directory if it doesn't exist
     input_dir.mkdir(parents=True, exist_ok=True)
     
-    # Get all subject directories from input path
-    subject_dirs = [d for d in input_dir.iterdir() if d.is_dir() and d.name.startswith('sub-')]
+    # List all contents of input directory for debugging
+    print("\nContents of input directory:")
+    try:
+        for item in input_dir.iterdir():
+            print(f"  {item.name} ({'directory' if item.is_dir() else 'file'})")
+    except Exception as e:
+        print(f"Error listing input directory: {str(e)}")
+        print("Trying to list parent directory...")
+        try:
+            for item in input_dir.parent.iterdir():
+                print(f"  {item.name} ({'directory' if item.is_dir() else 'file'})")
+        except Exception as e:
+            print(f"Error listing parent directory: {str(e)}")
+    
+    # Get all directories in input path (more flexible than just 'sub-' prefix)
+    try:
+        subject_dirs = [d for d in input_dir.iterdir() if d.is_dir()]
+    except Exception as e:
+        print(f"Error finding subject directories: {str(e)}")
+        print("Trying to find any directories in the current path...")
+        subject_dirs = [d for d in Path('.').iterdir() if d.is_dir()]
     
     if not subject_dirs:
-        print(f"No subject directories found in {input_dir}")
+        print(f"\nNo directories found in {input_dir}")
         print("Please ensure your data is mounted to this directory in the Docker container")
         print("Example Docker run command:")
         print("docker run -v /path/to/your/data:/data/input -v /path/to/output:/data/output neuronova-preprocessing")
         exit(1)
         
-    print(f"Found {len(subject_dirs)} subjects to process")
+    print(f"\nFound {len(subject_dirs)} directories to process:")
+    for d in subject_dirs:
+        print(f"  {d.name}")
     
     # Process each subject
     results = []
