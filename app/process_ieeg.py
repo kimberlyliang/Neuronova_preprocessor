@@ -18,47 +18,36 @@ class IEEGClipProcessor(IEEGTools):
     def __init__(self):
         super().__init__()
         self.project_root = Path(__file__).parent.parent
+        self.input_dir = Path(os.getenv('INPUT_DIR', '/data/input'))
+        print(f"Initialized with input directory: {self.input_dir}")
 
-    def find_subject_files(self, subject_id: str) -> Tuple[Path, Path, Path]:
-        """Find H5 and electrode reconstruction files for a subject.
+    def find_subject_files(self, subject_id: str) -> List[Tuple[Path, Path, Path]]:
+        """Find all iEEG files and their corresponding recon files for a subject.
         
         Args:
             subject_id (str): Subject ID to find files for
             
         Returns:
-            Tuple[Path, Path, Path]: Paths to iEEG file, electrode reconstruction file, and MNI electrode reconstruction file
+            List[Tuple[Path, Path, Path]]: List of tuples containing (ieeg_file_path, ieeg_recon_path, ieeg_recon_mni_path)
         """
-        try:
-            # Look in the input directory for the subject's files
-            input_dir = Path('/data/input')
-            subject_dir = input_dir / subject_id
-            print(f"Recursively searching for files in: {subject_dir}")
+        print(f"Recursively searching for files in: {self.input_dir / subject_id}")
+        
+        # Find all iEEG files
+        ieeg_files = list((self.input_dir / subject_id / 'ieeg_portal_clips').glob('interictal_ieeg_*.h5'))
+        if not ieeg_files:
+            raise FileNotFoundError(f"No iEEG files found for subject {subject_id}")
             
-            try:
-                ieeg_file = next(subject_dir.rglob('interictal_ieeg*.h5'))
-                print(f"Found iEEG file: {ieeg_file}")
-            except StopIteration:
-                raise FileNotFoundError(f"No iEEG file found anywhere under {subject_dir}")
+        # Find recon files (these should be the same for all iEEG files)
+        recon_file = self.input_dir / subject_id / 'module_4' / 'electrodes2ROI.csv'
+        recon_mni_file = self.input_dir / subject_id / 'module_3' / 'electrodes2ROI_mni152_corrected.csv'
+        
+        if not recon_file.exists():
+            raise FileNotFoundError(f"Recon file not found for subject {subject_id}")
+        if not recon_mni_file.exists():
+            raise FileNotFoundError(f"MNI recon file not found for subject {subject_id}")
             
-            try:
-                recon_file = next(subject_dir.rglob('*electrodes2ROI.csv'))
-                print(f"Found recon file: {recon_file}")
-            except StopIteration:
-                raise FileNotFoundError(f"No electrode reconstruction file found anywhere under {subject_dir}")
-            
-            try:
-                recon_mni_file = next(subject_dir.rglob('*electrodes2ROI_mni152_corrected.csv'))
-                print(f"Found MNI recon file: {recon_mni_file}")
-            except StopIteration:
-                raise FileNotFoundError(f"No MNI electrode reconstruction file found anywhere under {subject_dir}")
-            
-            self.ieeg_file_path = ieeg_file
-            self.ieeg_recon_path = recon_file
-            self.ieeg_recon_mni_path = recon_mni_file
-            
-            return self.ieeg_file_path, self.ieeg_recon_path, self.ieeg_recon_mni_path
-        except Exception as e:
-            raise FileNotFoundError(f"Error finding files for subject {subject_id}: {str(e)}")
+        # Return list of tuples, one for each iEEG file
+        return [(ieeg_file, recon_file, recon_mni_file) for ieeg_file in ieeg_files]
     
     def load_ieeg_clips(self, ieeg_file_path: Path) -> Tuple[pd.DataFrame, float]:
         """Load all iEEG clips from an H5 file into a single DataFrame.
@@ -213,6 +202,7 @@ class IEEGClipProcessor(IEEGTools):
         Args:
             subject_id (str): Subject ID to load data for
             plotEEG (bool, optional): Whether to plot the EEG data. Defaults to False.
+            saveEEG (bool, optional): Whether to save the processed data. Defaults to False.
             
         Returns:
             Tuple[pd.DataFrame, pd.DataFrame]: Filtered iEEG data and electrode information
@@ -220,8 +210,12 @@ class IEEGClipProcessor(IEEGTools):
         print("\n=== Starting process_raw_ieeg ===")
         # Step 1: Find the files
         print("Step 1: Finding files...")
-        ieeg_file_path, ieeg_recon_path, ieeg_recon_mni_path = self.find_subject_files(subject_id)
-        print(f"Found files:\n  iEEG: {ieeg_file_path}\n  Recon: {ieeg_recon_path}\n  MNI Recon: {ieeg_recon_mni_path}")
+        ieeg_files = self.find_subject_files(subject_id)
+        print(f"Found {len(ieeg_files)} iEEG files, processing first one:")
+        ieeg_file_path, ieeg_recon_path, ieeg_recon_mni_path = ieeg_files[0]
+        print(f"  iEEG: {ieeg_file_path}")
+        print(f"  Recon: {ieeg_recon_path}")
+        print(f"  MNI Recon: {ieeg_recon_mni_path}")
         
         # Step 2: Load the iEEG clips
         print("\nStep 2: Loading iEEG clips...")
@@ -268,12 +262,11 @@ class IEEGClipProcessor(IEEGTools):
 
         if saveEEG:
             print("\nSaving processed data...")
-            self.save_ieeg_processed(ieeg_filtered, sampling_rate, electrodes2ROI, subject_id)
+            self.save_ieeg_processed(ieeg_filtered, sampling_rate, electrodes2ROI, subject_id, ieeg_file_path)
 
-        print("=== Completed process_raw_ieeg ===\n")
         return ieeg_filtered, electrodes2ROI
     
-    def save_ieeg_processed(self, ieeg_filtered: pd.DataFrame, sampling_rate: float, electrodes2ROI: pd.DataFrame, subject_id: str) -> None:
+    def save_ieeg_processed(self, ieeg_filtered: pd.DataFrame, sampling_rate: float, electrodes2ROI: pd.DataFrame, subject_id: str, ieeg_file_path: Path) -> None:
         """Save the processed iEEG data and electrode information to a CSV file.
         
         Args:
@@ -281,6 +274,7 @@ class IEEGClipProcessor(IEEGTools):
             sampling_rate (float): Sampling rate of the data
             electrodes2ROI (pd.DataFrame): Electrode information
             subject_id (str): Subject ID
+            ieeg_file_path (Path): Path to the original iEEG file
         """
         print("\n=== Starting save_ieeg_processed ===")
         print(f"Input parameters:")
@@ -288,16 +282,18 @@ class IEEGClipProcessor(IEEGTools):
         print(f"  sampling_rate: {sampling_rate}")
         print(f"  electrodes2ROI shape: {electrodes2ROI.shape}")
         print(f"  subject_id: {subject_id}")
+        print(f"  ieeg_file_path: {ieeg_file_path}")
         
         # Get output path from environment variable, fallback to /data/output
         output_base = Path(os.getenv('OUTPUT_DIR', '/data/output'))
         print(f"Using output base path: {output_base}")
         
-        destination_path = output_base / subject_id
+        # Create the same directory structure as input
+        destination_path = output_base / subject_id / 'derivatives' / 'processed'
         print(f"Creating output directory: {destination_path}")
         destination_path.mkdir(parents=True, exist_ok=True)
         
-        h5_file_path = destination_path / 'interictal_ieeg_processed.h5'
+        h5_file_path = destination_path / f"{ieeg_file_path.stem}_processed.h5"
         print(f"Will save to: {h5_file_path}")
         
         # Check if file exists and handle accordingly
@@ -327,7 +323,7 @@ class IEEGClipProcessor(IEEGTools):
                 ieeg_h5.attrs['sampling_rate'] = sampling_rate
                 ieeg_h5.attrs['channels_labels'] = ieeg_filtered.columns.tolist()
                 ieeg_h5.attrs['shape'] = ieeg_filtered.shape
-                ieeg_h5.attrs['raw_data_file'] = str(self.ieeg_file_path.name)
+                ieeg_h5.attrs['raw_data_file'] = str(ieeg_file_path.name)
                 ieeg_h5.attrs['subject_id'] = subject_id
                 
                 print("Saving electrode data...")

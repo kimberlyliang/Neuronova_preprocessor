@@ -21,7 +21,11 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install -r /app/requirements.txt
 COPY app/ /app/
 WORKDIR /app
-RUN mkdir -p data/input data/output
+
+# Create data directories with proper permissions
+RUN mkdir -p /data/input /data/output && \
+    chmod -R 777 /data
+
 ENV INPUT_DIR=/data/input
 ENV OUTPUT_DIR=/data/output
 CMD ["python", "process_ieeg.py"]
