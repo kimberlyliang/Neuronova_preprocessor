@@ -31,20 +31,25 @@ class IEEGClipProcessor(IEEGTools):
             List[Tuple[Path, Path, Path]]: List of tuples containing (ieeg_file_path, ieeg_recon_path, ieeg_recon_mni_path)
         """
         print(f"Recursively searching for files in: {self.input_dir / subject_id}")
+        subject_dir = self.input_dir / subject_id
         
-        # Find all iEEG files
-        ieeg_files = list((self.input_dir / subject_id / 'ieeg_portal_clips').glob('interictal_ieeg_*.h5'))
+        # Find all iEEG files recursively
+        ieeg_files = list(subject_dir.rglob('interictal_ieeg_*.h5'))
         if not ieeg_files:
             raise FileNotFoundError(f"No iEEG files found for subject {subject_id}")
             
-        # Find recon files (these should be the same for all iEEG files)
-        recon_file = self.input_dir / subject_id / 'module_4' / 'electrodes2ROI.csv'
-        recon_mni_file = self.input_dir / subject_id / 'module_3' / 'electrodes2ROI_mni152_corrected.csv'
-        
-        if not recon_file.exists():
-            raise FileNotFoundError(f"Recon file not found for subject {subject_id}")
-        if not recon_mni_file.exists():
-            raise FileNotFoundError(f"MNI recon file not found for subject {subject_id}")
+        # Find recon files recursively
+        try:
+            recon_file = next(subject_dir.rglob('*electrodes2ROI.csv'))
+            print(f"Found recon file: {recon_file}")
+        except StopIteration:
+            raise FileNotFoundError(f"No electrode reconstruction file found for subject {subject_id}")
+            
+        try:
+            recon_mni_file = next(subject_dir.rglob('*electrodes2ROI_mni152_corrected.csv'))
+            print(f"Found MNI recon file: {recon_mni_file}")
+        except StopIteration:
+            raise FileNotFoundError(f"No MNI electrode reconstruction file found for subject {subject_id}")
             
         # Return list of tuples, one for each iEEG file
         return [(ieeg_file, recon_file, recon_mni_file) for ieeg_file in ieeg_files]
