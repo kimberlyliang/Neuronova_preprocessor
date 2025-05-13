@@ -289,9 +289,8 @@ class IEEGClipProcessor(IEEGTools):
         print(f"  electrodes2ROI shape: {electrodes2ROI.shape}")
         print(f"  subject_id: {subject_id}")
         
-        # Try to get output path from environment variable, fallback to /data/output
-        load_dotenv()
-        output_base = Path(os.getenv('OUTPUT_PATH', '/data/output'))
+        # Get output path from environment variable, fallback to /data/output
+        output_base = Path(os.getenv('OUTPUT_DIR', '/data/output'))
         print(f"Using output base path: {output_base}")
         
         destination_path = output_base / subject_id
@@ -365,12 +364,21 @@ def process_subject(subject_id):
         return subject_id, False
 
 if __name__ == "__main__":
+    # Get input path from environment variable, fallback to /data/input
+    input_dir = Path(os.getenv('INPUT_DIR', '/data/input'))
+    print(f"Using input base path: {input_dir}")
+    
+    # Create input directory if it doesn't exist
+    input_dir.mkdir(parents=True, exist_ok=True)
+    
     # Get all subject directories from input path
-    input_dir = Path('/data/input')
     subject_dirs = [d for d in input_dir.iterdir() if d.is_dir() and d.name.startswith('sub-')]
     
     if not subject_dirs:
-        print("No subject directories found in /data/input")
+        print(f"No subject directories found in {input_dir}")
+        print("Please ensure your data is mounted to this directory in the Docker container")
+        print("Example Docker run command:")
+        print("docker run -v /path/to/your/data:/data/input -v /path/to/output:/data/output neuronova-preprocessing")
         exit(1)
         
     print(f"Found {len(subject_dirs)} subjects to process")
@@ -394,11 +402,11 @@ if __name__ == "__main__":
     
     print(f"\nSuccessfully processed ({len(successful)}):")
     for subject in successful:
-        print(f"{subject}")
+        print(f"  ✓ {subject}")
         
     if failed:
         print(f"\nFailed to process ({len(failed)}):")
         for subject in failed:
-            print(f"{subject}")
+            print(f"  ✗ {subject}")
 
 # %%
