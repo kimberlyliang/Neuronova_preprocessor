@@ -12,6 +12,9 @@ from scipy import signal
 from process_ieeg_utils import IEEGTools
 from dotenv import load_dotenv
 import os
+import logging
+import time
+from datetime import datetime
 
 #%%
 class IEEGClipProcessor(IEEGTools):
@@ -200,7 +203,7 @@ class IEEGClipProcessor(IEEGTools):
             start=0
         )
 
-    def process_raw_ieeg(self, subject_id: str, plotEEG: bool = False, saveEEG: bool = False) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    def process_raw_ieeg(self, subject_id: str, plotEEG: bool = False, saveEEG: bool = False, ieeg_files: List[Tuple[Path, Path, Path]] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Process iEEG data for a subject from raw to filtered data with electrode information.
         
@@ -208,6 +211,7 @@ class IEEGClipProcessor(IEEGTools):
             subject_id (str): Subject ID to load data for
             plotEEG (bool, optional): Whether to plot the EEG data. Defaults to False.
             saveEEG (bool, optional): Whether to save the processed data. Defaults to False.
+            ieeg_files (List[Tuple[Path, Path, Path]], optional): List of iEEG files to process. Defaults to None.
             
         Returns:
             Tuple[pd.DataFrame, pd.DataFrame]: Filtered iEEG data and electrode information
@@ -215,7 +219,8 @@ class IEEGClipProcessor(IEEGTools):
         print("\n=== Starting process_raw_ieeg ===")
         # Step 1: Find the files
         print("Step 1: Finding files...")
-        ieeg_files = self.find_subject_files(subject_id)
+        if ieeg_files is None:
+            ieeg_files = self.find_subject_files(subject_id)
         print(f"Found {len(ieeg_files)} iEEG files, processing first one:")
         ieeg_file_path, ieeg_recon_path, ieeg_recon_mni_path = ieeg_files[0]
         print(f"  iEEG: {ieeg_file_path}")
@@ -289,8 +294,8 @@ class IEEGClipProcessor(IEEGTools):
         print(f"  subject_id: {subject_id}")
         print(f"  ieeg_file_path: {ieeg_file_path}")
         
-        # Get output path from environment variable, fallback to /data/output
-        output_base = Path(os.getenv('OUTPUT_DIR', '/data/output'))
+        # Get output path from environment variable, fallback to data/output
+        output_base = Path(os.getenv('OUTPUT_DIR', 'data/output'))
         print(f"Using output base path: {output_base}")
         
         # Create the same directory structure as input
@@ -352,12 +357,24 @@ class IEEGClipProcessor(IEEGTools):
         print("=== Completed save_ieeg_processed ===\n")
 
 # Define the function outside the if __name__ == "__main__" block
-def process_subject(subject_id):
+def process_subject(subject_id, h5_file_path=None):
     try:
         print(f"Processing {subject_id}...")
         ieeg = IEEGClipProcessor()
+        if h5_file_path:
+            # If we already have the H5 file path, find the recon files in the subject directory
+            subject_dir = h5_file_path.parent.parent  # Go up two levels to get subject directory
+            try:
+                recon_file = next(subject_dir.rglob('*electrodes2ROI.csv'))
+                recon_mni_file = next(subject_dir.rglob('*electrodes2ROI_mni152_corrected.csv'))
+                ieeg_files = [(h5_file_path, recon_file, recon_mni_file)]
+            except StopIteration as e:
+                raise FileNotFoundError(f"Could not find recon files for subject {subject_id}: {str(e)}")
+        else:
+            # Otherwise, find all files for this subject
+            ieeg_files = ieeg.find_subject_files(subject_id)
         print(f"Found files for {subject_id}")
-        ieeg_filtered, electrodes2ROI = ieeg.process_raw_ieeg(subject_id, saveEEG=True)
+        ieeg_filtered, electrodes2ROI = ieeg.process_raw_ieeg(subject_id, saveEEG=True, ieeg_files=ieeg_files)
         print(f"Completed processing {subject_id}")
         return subject_id, True
     except Exception as e:
@@ -365,77 +382,86 @@ def process_subject(subject_id):
         return subject_id, False
 
 if __name__ == "__main__":
-    # Print environment information
-    print("\nEnvironment Information:")
-    print(f"Current working directory: {os.getcwd()}")
-    print(f"Directory contents:")
-    for item in Path('.').iterdir():
-        print(f"  {item.name} ({'directory' if item.is_dir() else 'file'})")
+    # Set up logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    logger = logging.getLogger(__name__)
     
-    # Get input path from environment variable, fallback to /data/input
-    input_dir = Path(os.getenv('INPUT_DIR', '/data/input'))
-    print(f"\nUsing input base path: {input_dir}")
+    logger.info("Starting iEEG processing...")
+    start_time = time.time()
     
-    # Create input directory if it doesn't exist
-    input_dir.mkdir(parents=True, exist_ok=True)
+    # Get base input directory from environment variable or default
+    input_base_dir = Path(os.environ.get('INPUT_DIR', 'data/input'))
+    output_base_dir = Path(os.environ.get('OUTPUT_DIR', 'data/output'))
+    logger.info(f"Input directory: {input_base_dir}")
+    logger.info(f"Output directory: {output_base_dir}")
     
-    # List all contents of input directory for debugging
-    print("\nContents of input directory:")
     try:
-        for item in input_dir.iterdir():
-            print(f"  {item.name} ({'directory' if item.is_dir() else 'file'})")
-    except Exception as e:
-        print(f"Error listing input directory: {str(e)}")
-        print("Trying to list parent directory...")
-        try:
-            for item in input_dir.parent.iterdir():
-                print(f"  {item.name} ({'directory' if item.is_dir() else 'file'})")
-        except Exception as e:
-            print(f"Error listing parent directory: {str(e)}")
-    
-    # Get all directories in input path (more flexible than just 'sub-' prefix)
-    try:
-        subject_dirs = [d for d in input_dir.iterdir() if d.is_dir()]
-    except Exception as e:
-        print(f"Error finding subject directories: {str(e)}")
-        print("Trying to find any directories in the current path...")
-        subject_dirs = [d for d in Path('.').iterdir() if d.is_dir()]
-    
-    if not subject_dirs:
-        print(f"\nNo directories found in {input_dir}")
-        print("Please ensure your data is mounted to this directory in the Docker container")
-        print("Example Docker run command:")
-        print("docker run -v /path/to/your/data:/data/input -v /path/to/output:/data/output neuronova-preprocessing")
-        exit(1)
+        # Find all H5 files in the input directory
+        possible_filenames = [
+            'interictal_ieeg_processed.h5',
+            'interictal_ieeg_wake_processed.h5',
+            'interictal_ieeg_day*.h5',  # For files like interictal_ieeg_day9.h5
+            'interictal_ieeg_*.h5'      # Catch-all for any other interictal files
+        ]
+        h5_files = []
         
-    print(f"\nFound {len(subject_dirs)} directories to process:")
-    for d in subject_dirs:
-        print(f"  {d.name}")
-    
-    # Process each subject
-    results = []
-    for subject_dir in subject_dirs:
-        subject_id = subject_dir.name
-        print(f"\nProcessing {subject_id}...")
-        try:
-            result = process_subject(subject_id)
-            results.append(result)
-        except Exception as e:
-            print(f"Error processing {subject_id}: {str(e)}")
-            results.append((subject_id, False))
-    
-    # Print summary
-    print("\nProcessing Summary:")
-    successful = [s for s, success in results if success]
-    failed = [s for s, success in results if not success]
-    
-    print(f"\nSuccessfully processed ({len(successful)}):")
-    for subject in successful:
-        print(f"  ✓ {subject}")
+        # Search for all H5 files globally in input directory
+        for filename in possible_filenames:
+            found_files = list(input_base_dir.rglob(filename))
+            if found_files:
+                logger.info(f"Found {len(found_files)} files matching {filename}")
+                h5_files.extend(found_files)
         
-    if failed:
-        print(f"\nFailed to process ({len(failed)}):")
-        for subject in failed:
-            print(f"  ✗ {subject}")
+        # Remove duplicates (in case a file matches multiple patterns)
+        h5_files = list(set(h5_files))
+        
+        if not h5_files:
+            raise FileNotFoundError(f"No H5 files found in {input_base_dir} or its subdirectories")
+        
+        logger.info(f"Found {len(h5_files)} unique H5 files to process")
+        
+        # Process each H5 file
+        results = []
+        for h5_file in h5_files:
+            logger.info(f"\nProcessing file: {h5_file}")
+            try:
+                # Extract subject ID from the file path
+                subject_id = h5_file.parent.parent.name  # Go up two levels to get subject ID
+                logger.info(f"Processing subject: {subject_id}")
+                
+                # Process the subject with the known H5 file path
+                result = process_subject(subject_id, h5_file_path=h5_file)
+                results.append(result)
+                
+                logger.info(f"Completed processing for {subject_id}")
+            except Exception as e:
+                logger.error(f"Error processing {h5_file}: {str(e)}", exc_info=True)
+                logger.info("Continuing with next file...")
+                results.append((subject_id, False))
+                continue
+        
+        # Print summary
+        end_time = time.time()
+        logger.info(f"\nProcessing Summary (Total time: {end_time - start_time:.2f} seconds):")
+        
+        successful = [s for s, success in results if success]
+        failed = [s for s, success in results if not success]
+        
+        logger.info(f"\nSuccessfully processed ({len(successful)}):")
+        for subject in successful:
+            logger.info(f"{subject}")
+            
+        if failed:
+            logger.info(f"\nFailed to process ({len(failed)}):")
+            for subject in failed:
+                logger.info(f"{subject}")
+        
+    except Exception as e:
+        logger.error(f"Error in main process: {str(e)}", exc_info=True)
+        raise
 
 # %%
